@@ -1,0 +1,201 @@
+---
+output: html_document
+---
+---
+
+# title: "Movielens"
+# author: "Sijuade"
+# date: "Friday, September 04, 2015"
+# output: html_document
+# Data Location: [linked phrase](http://grouplens.org/datasets/movielens/)
+
+
+
+The data dictioary for this dataset is located at [linked phrase](http://files.grouplens.org/datasets/movielens/ml-100k-README.txt). The data originally downloaded was mostly in text format and had to be transformed to csv. 
+
+After much wrangling, I have 3 files imported into R.
+
+The dataset has 100,000 ratings total and 943 unique users as well as 1682 movies, The average user rated about 106 movies and the average movie was rated about 59 times.
+There's a wide variance in the number ratings each movie has, some movies were rated just once and the movie with the most amount of ratings was rated 583 times.
+
+
+```{r}
+occupation = read.csv("occupation.csv")
+ratings = read.csv("ratings.csv")
+films = read.csv("movieinfo.csv")
+
+occupation$X = NULL
+films$X = NULL
+ratings$X = NULL
+```
+
+Below is a head of all three datasets
+
+```{r, echo=FALSE}
+head(occupation)
+head(films)
+head(ratings)
+```
+
+Since predicting ratings is the point of this exercise, it makes sense to combine all three into one dataset, or rather to merge the films and occupations dataset into the ratings dataset. But first we can explore the individual datasets in detail. First is a plot ratings just to get a feel of it's distribution
+
+```{r echo=FALSE}
+library(ggplot2)
+qplot(ratings$rating)
+```
+
+A rating of 4 looks to be the most common followed by 3 and then 5. 
+
+```{r echo=FALSE}
+ggplot(aes(movieid), data = ratings) + geom_histogram(binwidth = 1, position = "dodge") + scale_x_continuous(breaks = seq(0, 1500, 100))
+```
+
+Histogram of movieid, this shows how much different ratings some movies are getting. Some movies are definitely being rated more often than others, one possible reason for this is that the movies are likely simply being viewed more times. 
+
+The following plots will look into the users
+```{r echo=FALSE}
+qplot(data = occupation, age, binwidth = 1, position = "dodge") + scale_x_continuous(breaks = seq(0, 70, 5))
+
+```
+
+This plot shows an almost normal distribution of age for the users, it shows that a majority of the users are between the ages of 18 and 30. The plot below shows there are more male than female users and the plot below that shows the same histogram of users' age but split by gender
+
+```{r echo=FALSE}
+qplot(gender, data = occupation)
+
+qplot(data = occupation, age, binwidth = 1, position = "dodge", fill = gender) + scale_x_continuous(breaks = seq(0, 70, 5))
+
+```
+
+
+Here we see Students are the most common of users, followed by educators, administrators and engineers. 
+```{r}
+qplot(occupation, data = occupation)
+
+```
+
+## Joining of the three datasets
+
+Ratings and occupation are now joined, we see it's head
+```{r echo=FALSE}
+library(plyr)
+
+df = join(ratings, occupation, by = "userid", type = "left", match = "all")
+head(df)
+
+```
+
+
+We can now join with the last dataset films. And also it's head.
+
+```{r echo=FALSE}
+df = join(df, films, by = "movieid", type = "left", match = "all")
+head(df)
+
+```
+
+It would make a lot more sense to split up the age into bins
+```{r echo=FALSE}
+
+agebin = c("Under 18","18 - 24","25 - 34","35 - 44","45 - 49","50 - 55","Over 56")
+
+df$age = with(df, ifelse(age < 18, "Under 18", ifelse(age >= 18 & age <= 24, "18 - 24", ifelse(age >= 25 & age <= 34, "25 - 34", ifelse(age >= 35 & age <= 44, "35 - 44", ifelse(age >= 45 & age <= 49, "45 - 49", ifelse(age >= 50 & age <= 55, "50 - 55", "Over 55"))) ))))
+
+df$age = factor(df$age, levels = agebin, order = T)
+
+qplot(age, data = df)
+
+qplot(rating, fill = age, data = df)
+
+```
+
+
+
+Information like imdburl would normally be very useful because from it we can gather more information through its API like the actors in the movie and the runtime, information like this can only help improve a predictive model, these all can be looked into at a later time and so can be removed for now, the id columns are also no longer needed and can also be removed. Timestamp refers to the time the users made the rating and so won't be required. While it's concievable that the release date of a movie could impact people wanting to see it (Some people prefering movies from a certain time period over others), it's unlikely the time a rating was given would and so the rating column can also be excluded 
+
+
+```{r echo=FALSE}
+df$videoreleasedate = NULL
+df$imdburl = NULL
+df$movieid = NULL
+df$timestamp = NULL
+
+```
+
+At this point, I am considering removing movietitle but will leave it in there for now. My reason is because I see two possible models that could be built. One model could be to learn how a particular user rates movies based on the characteristics of the movies they've rated and then predict how they'd rate new movies based on the new movie's characteristics with the end result being that the model recommends to them the movies the algorithm predicts they would have rated highly. In this case, the name of the movie the user rated is not important and thus can be removed, its characteristics however are important, and here getting more information on the movie from imdb would really help. This model is user-centric and wouldn't be useful until the user has seen and rated enough movies.
+
+Another possible model would be to not be user-specific but to instead be userinfo-specific, what this means is to learn not on the particular user, but on the user's information like age, occupation e.t.c While this would be a much less restrictive algorithm in that it doesn't require that the user rate a lot of movies to begin with because it predicts based on the user's info as opposed to the particular user, the downside here is that we are making an assumption that users with a similar background would rate particular movies similarly, this kind of assumption would only really be justified if we had a lot of personal information. There however is no harm in trying and see how well it does.
+
+
+A different albeit more difficult model would be to use an unsupervised learning algorithm to somehow divide up the users into specific classes(clusters) with each cluster representing movie tastes/preferences. This would be a more general implementation as it wouldn't require the ratings column to make it's predictions. 
+
+
+For the first implementation, I'm splitting the dataset into 3, the train set, a cross-validation set as well as a test set, the reason for this is to detect if the algorithm is overfitting. I will run this using a boosted decision tree and report the errors for all three. I'll be using two different metrics to measure the error, the mean absolute error and the root mean square error. Both these metrics are great for this kind of problem. 
+
+A first run gives really good errors:
+
+## Train set
+
+Mean Absolute Error |  Root Mean Squared Error
+------------------  | ------------------------
+0.651983            | 0.932193
+
+## CV Set
+
+Mean Absolute Error |  Root Mean Squared Error
+------------------  | ------------------------
+0.708               | 0.994736
+
+
+## Test Set
+
+Mean Absolute Error |  Root Mean Squared Error
+------------------  | ------------------------
+0.7118              | 0.99955
+
+There is a difference between the Train set errors and both the CV and test set errors but not enough to suggest overfitting.
+
+While there is plenty of opportunity to tune the parameters and possibly get a lower error, the error given is good enough for what it's needed for. 
+
+Below is a residual vs fitted plot for each of the sets , this lets us see how the algorithm is performing on what it's predicting right and wrong. All the points at zero are the examples predicted correctly for that particular prediction with the predictions around zero how much wrong the predictions are.
+
+```{r echo=FALSE}
+trainset = read.csv("trainset.csv")
+cvset =  read.csv("cvset.csv")
+testset = read.csv("testset.csv")
+
+  ggplot(aes(predicted, actual - predicted), data = trainset) + 
+  geom_point(alpha = 0.6, position= "jitter") + 
+  ylab("predicted") + 
+  ggtitle("Plot of Predicted vs residual for Train set") + 
+  xlab("Predicted") + ylab("Residual") + scale_x_discrete()
+
+
+  ggplot(aes(predicted, actual - predicted), data = cvset) + 
+  geom_point(alpha = 0.6, position= "jitter") + 
+  ylab("predicted") + 
+  ggtitle("Plot of Predicted vs residual for CV set") + 
+  xlab("Predicted") + ylab("Residual")
+
+
+ggplot(aes(predicted, actual - predicted), data = testset) + 
+geom_point(alpha = 0.6, position= "jitter") + 
+  ylab("predicted") + 
+  ggtitle("Plot of Predicted vs residual for Test set") + 
+  xlab("Predicted") + ylab("Residual")
+
+
+```
+
+
+These three plots are fairly identical, what this tells us is that there's not a lot of overfitting happening, also it shows the distribution of the errors, for ratings 1 and 2, our model sometimes predicts incorrectly but not by more than 2 ratings points above (meaning an actual rating of 1 sometimes gets predicted as 2 or 3), ratings of 3 sometimes gets predicted by up to two points in both directions and ratings 4/5 by not more than 2 points below. We also see that the errors closer to zero are darker than the others which suggests most of the errors are closer to zero.
+Below is a head of the predictions and actual ratings.
+
+```{r echo=FALSE}
+head(cvset, n=25)
+```
+
+While it is possible to fine tune and boost the performance of this algorithm a bit more, the results we get aren't actually that bad which means given enough ratings by a particular customer, we can predict with a relatively high confidence, what other movies they likely would rate highly. 
+
+The second and third part of this project would be trying to implement the two other ideas discussed earlier.
+
